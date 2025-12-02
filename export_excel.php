@@ -4,14 +4,16 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/family_service.php';
 
 require_login();
 
 $type = $_GET['type'] ?? 'summary';
-$setting = fetch_settings($mysqli);
+$setting = fetch_settings();
 $harga  = setting_value($setting, 'harga');
 $berasV = setting_value($setting, 'beras');
 $jagungV = setting_value($setting, 'jagung');
+$families = fetch_all_families();
 
 $filename = "export_{$type}_" . date('Ymd_His') . ".xls";
 header("Content-Type: application/vnd.ms-excel; charset=UTF-8");
@@ -59,32 +61,30 @@ if ($type === 'summary') {
         <th>Uang (Rp)</th><th>Beras (kg)</th><th>Jagung (kg)</th><th>Infaq (Rp)</th>
     </tr></thead><tbody>";
 
-    $sql = "
-        SELECT 
-            f.id, f.kepala, COUNT(m.id) AS jumlah_anggota,
-            COALESCE(SUM(m.uang),0) AS jml_uang,
-            COALESCE(SUM(m.beras),0) AS jml_beras,
-            COALESCE(SUM(m.jagung),0) AS jml_jagung,
-            COALESCE(f.infaq,0) AS infaq
-        FROM families f
-        LEFT JOIN members m ON f.id = m.family_id
-        GROUP BY f.id ORDER BY f.id ASC";
-    $res = $mysqli->query($sql);
-
     $no = 1;
     $grandUang = 0;
     $grandBeras = 0;
     $grandJagung = 0;
     $grandInfaq = 0;
-    while ($r = $res->fetch_assoc()) {
-        $uangRp = $r['jml_uang'] * $harga;
-        $beras = $r['jml_beras'] * $berasV;
-        $jagung = $r['jml_jagung'] * $jagungV;
-        $infaq = $r['infaq'];
+    foreach ($families as $family) {
+        $memberCount = count($family['anggota']);
+        $jmlUang = 0;
+        $jmlBeras = 0;
+        $jmlJagung = 0;
+        foreach ($family['anggota'] as $member) {
+            $jmlUang += !empty($member['uang']) ? 1 : 0;
+            $jmlBeras += !empty($member['beras']) ? 1 : 0;
+            $jmlJagung += !empty($member['jagung']) ? 1 : 0;
+        }
+
+        $uangRp = $jmlUang * $harga;
+        $beras = $jmlBeras * $berasV;
+        $jagung = $jmlJagung * $jagungV;
+        $infaq = $family['infaq'] ?? 0;
         echo "<tr>
             <td>{$no}</td>
-            <td>{$r['kepala']}</td>
-            <td>{$r['jumlah_anggota']}</td>
+            <td>{$family['kepala']}</td>
+            <td>{$memberCount}</td>
             <td>" . format_rupiah((float)$uangRp) . "</td>
             <td>{$beras}</td>
             <td>{$jagung}</td>
@@ -124,20 +124,6 @@ if ($type === 'detail') {
         <th>Infaq (Rp)</th>
     </tr></thead><tbody>";
 
-    $sql = "
-        SELECT 
-            f.id AS family_id,
-            f.kepala,
-            f.infaq,
-            m.nama,
-            m.jk,
-            m.uang, m.beras, m.jagung
-        FROM families f
-        LEFT JOIN members m ON f.id = m.family_id
-        ORDER BY f.id ASC, m.id ASC
-    ";
-    $res = $mysqli->query($sql);
-
     $no = 1;
     $lastFamily = null;
 
@@ -147,49 +133,49 @@ if ($type === 'detail') {
     $totalJagung = 0;
     $totalInfaq = 0;
 
-    while ($r = $res->fetch_assoc()) {
-        // tampilkan infaq hanya sekali per keluarga
-        $infaqOut = '';
-        if ($lastFamily !== $r['family_id']) {
-            $infaqOut = (int)$r['infaq'];
-            $totalInfaq += $infaqOut;
-            $lastFamily = $r['family_id'];
-        }
+    foreach ($families as $family) {
+        foreach ($family['anggota'] as $member) {
+            $infaqOut = '';
+            if ($lastFamily !== $family['id']) {
+                $infaqOut = (int)($family['infaq'] ?? 0);
+                $totalInfaq += $infaqOut;
+                $lastFamily = $family['id'];
+            }
 
-        // pilihan per anggota
-        $pilihan = [];
-        $uangRp = 0;
-        $berasKg = 0;
-        $jagungKg = 0;
+            $pilihan = [];
+            $uangRp = 0;
+            $berasKg = 0;
+            $jagungKg = 0;
 
-        if ((int)$r['uang'] === 1) {
-            $pilihan[] = 'Uang';
-            $uangRp = $harga;
-            $totalUang += $uangRp;
-        }
-        if ((int)$r['beras'] === 1) {
-            $pilihan[] = 'Beras';
-            $berasKg = $berasV;
-            $totalBeras += $berasKg;
-        }
-        if ((int)$r['jagung'] === 1) {
-            $pilihan[] = 'Jagung';
-            $jagungKg = $jagungV;
-            $totalJagung += $jagungKg;
-        }
+            if (!empty($member['uang'])) {
+                $pilihan[] = 'Uang';
+                $uangRp = $harga;
+                $totalUang += $uangRp;
+            }
+            if (!empty($member['beras'])) {
+                $pilihan[] = 'Beras';
+                $berasKg = $berasV;
+                $totalBeras += $berasKg;
+            }
+            if (!empty($member['jagung'])) {
+                $pilihan[] = 'Jagung';
+                $jagungKg = $jagungV;
+                $totalJagung += $jagungKg;
+            }
 
-        echo "<tr>
-            <td>{$no}</td>
-            <td>{$r['kepala']}</td>
-            <td>{$r['nama']}</td>
-            <td>{$r['jk']}</td>
-            <td>" . implode('+', $pilihan) . "</td>
-            <td>" . format_rupiah((float)$uangRp) . "</td>
-            <td>{$berasKg}</td>
-            <td>{$jagungKg}</td>
-            <td>" . ($infaqOut ? format_rupiah((float)$infaqOut) : '') . "</td>
-        </tr>";
-        $no++;
+            echo "<tr>
+                <td>{$no}</td>
+                <td>{$family['kepala']}</td>
+                <td>{$member['nama']}</td>
+                <td>{$member['jk']}</td>
+                <td>" . implode('+', $pilihan) . "</td>
+                <td>" . format_rupiah((float)$uangRp) . "</td>
+                <td>{$berasKg}</td>
+                <td>{$jagungKg}</td>
+                <td>" . ($infaqOut ? format_rupiah((float)$infaqOut) : '') . "</td>
+            </tr>";
+            $no++;
+        }
     }
 
     // tambahkan baris total keseluruhan
@@ -204,3 +190,7 @@ if ($type === 'detail') {
     echo "</tbody></table>";
     exit;
 }
+
+// Jika tipe tidak dikenali
+// Fitur ini dinonaktifkan pada versi tanpa database
+exit('Tipe export tidak dikenali.');
