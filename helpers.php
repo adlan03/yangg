@@ -29,26 +29,23 @@ function require_login(): void
 }
 
 /**
- * Ambil setting global, fallback ke default bila tidak ada.
+ * Ambil setting global dari sesi, fallback ke default bila tidak ada.
  */
-function fetch_settings(mysqli $db): array
+function fetch_settings(): array
 {
-    $stmt = $db->prepare("SELECT harga, beras, jagung, locked FROM settings WHERE id = 1");
-    if ($stmt && $stmt->execute()) {
-        $result = $stmt->get_result();
-        if ($result) {
-            $row = $result->fetch_assoc();
-            $stmt->close();
-            if ($row) {
-                // pastikan angka dikonversi ke tipe numeric
-                $normalized = array_map(static fn($value) => is_numeric($value) ? $value + 0 : $value, $row);
-                return array_merge(DEFAULT_SETTINGS, $normalized);
-            }
-        }
-        $stmt->close();
+    if (isset($_SESSION['settings']) && is_array($_SESSION['settings'])) {
+        return array_merge(DEFAULT_SETTINGS, $_SESSION['settings']);
     }
 
     return DEFAULT_SETTINGS;
+}
+
+/**
+ * Simpan setting ke sesi (simulasi tanpa database).
+ */
+function store_settings(array $settings): void
+{
+    $_SESSION['settings'] = array_merge(DEFAULT_SETTINGS, $settings);
 }
 
 /**

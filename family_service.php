@@ -4,35 +4,52 @@ declare(strict_types=1);
 require_once __DIR__ . '/helpers.php';
 
 /**
- * Kumpulan fungsi layanan untuk operasi keluarga dan pengaturan.
+ * Kumpulan fungsi layanan untuk operasi keluarga dan pengaturan (simulasi tanpa database).
  */
 
-function is_settings_locked(mysqli $db): bool
+function ensure_family_store(): void
 {
-    $res = $db->query("SELECT locked FROM settings WHERE id=1");
-    if (!$res) {
-        return false;
+    if (!isset($_SESSION['families']) || !is_array($_SESSION['families'])) {
+        // Dummy data awal
+        $_SESSION['families'] = [
+            [
+                'id' => 1,
+                'kepala' => 'Kepala Keluarga 1',
+                'infaq' => INFAQ_VALUE,
+                'anggota' => [
+                    ['nama' => 'Anggota 1', 'jk' => 'L', 'uang' => 1, 'beras' => 0, 'jagung' => 0],
+                    ['nama' => 'Anggota 2', 'jk' => 'P', 'uang' => 0, 'beras' => 1, 'jagung' => 0],
+                ],
+            ],
+        ];
+        $_SESSION['family_seq'] = 2;
     }
 
-    $row = $res->fetch_assoc();
-    return isset($row['locked']) && (int)$row['locked'] === 1;
+    if (!isset($_SESSION['family_seq'])) {
+        $_SESSION['family_seq'] = count($_SESSION['families']) + 1;
+    }
 }
 
-function update_settings(mysqli $db, int $harga, float $beras, float $jagung): void
+function is_settings_locked(): bool
 {
-    $stmt = $db->prepare("UPDATE settings SET harga=?, beras=?, jagung=? WHERE id=1");
-    $stmt->bind_param("idd", $harga, $beras, $jagung);
-    $stmt->execute();
-    $stmt->close();
+    $settings = fetch_settings();
+    return !empty($settings['locked']);
 }
 
-function set_setting_lock(mysqli $db, bool $locked): void
+function update_settings(int $harga, float $beras, float $jagung): void
 {
-    $stmt = $db->prepare("UPDATE settings SET locked=? WHERE id=1");
-    $lockVal = $locked ? 1 : 0;
-    $stmt->bind_param("i", $lockVal);
-    $stmt->execute();
-    $stmt->close();
+    store_settings([
+        'harga' => $harga,
+        'beras' => $beras,
+        'jagung' => $jagung,
+    ]);
+}
+
+function set_setting_lock(bool $locked): void
+{
+    $settings = fetch_settings();
+    $settings['locked'] = $locked ? 1 : 0;
+    store_settings($settings);
 }
 
 function collect_members_from_post(array $post): array
@@ -60,100 +77,49 @@ function collect_members_from_post(array $post): array
     return $members;
 }
 
-function insert_family(mysqli $db, string $kepala, int $infaq): int
+function save_family(string $kepala, int $infaq, array $members): void
 {
-    $stmt = $db->prepare("INSERT INTO families (kepala, infaq) VALUES (?, ?)");
-    $stmt->bind_param("si", $kepala, $infaq);
-    $stmt->execute();
-    $familyId = $stmt->insert_id;
-    $stmt->close();
-
-    return (int)$familyId;
+    ensure_family_store();
+    $id = $_SESSION['family_seq']++;
+    $_SESSION['families'][] = [
+        'id' => $id,
+        'kepala' => $kepala,
+        'infaq' => $infaq,
+        'anggota' => $members,
+    ];
 }
 
-function insert_members(mysqli $db, int $familyId, array $members): void
+function fetch_all_families(): array
 {
-    $stmt = $db->prepare(
-        "INSERT INTO members (family_id, nama, jk, uang, beras, jagung) VALUES (?, ?, ?, ?, ?, ?)"
-    );
+    ensure_family_store();
+    return $_SESSION['families'];
+}
 
-    foreach ($members as $member) {
-        $stmt->bind_param(
-            "issiii",
-            $familyId,
-            $member['nama'],
-            $member['jk'],
-            $member['uang'],
-            $member['beras'],
-            $member['jagung']
-        );
-        $stmt->execute();
+function delete_family(int $familyId): void
+{
+    ensure_family_store();
+    $_SESSION['families'] = array_values(array_filter(
+        $_SESSION['families'],
+        static fn($family) => (int)$family['id'] !== $familyId
+    ));
+}
+
+function reset_all_families(): void
+{
+    $_SESSION['families'] = [];
+    $_SESSION['family_seq'] = 1;
+}
+
+function replace_family(int $familyId, int $infaq, array $members): void
+{
+    ensure_family_store();
+    foreach ($_SESSION['families'] as &$family) {
+        if ((int)$family['id'] === $familyId) {
+            $family['infaq'] = $infaq;
+            $family['anggota'] = $members;
+            break;
+        }
     }
-
-    $stmt->close();
-}
-
-function save_family(mysqli $db, string $kepala, int $infaq, array $members): void
-{
-    $familyId = insert_family($db, $kepala, $infaq);
-    insert_members($db, $familyId, $members);
-}
-
-function fetch_family_members(mysqli $db, int $familyId): array
-{
-    $members = [];
-    $memberResult = $db->query("SELECT * FROM members WHERE family_id = {$familyId} ORDER BY id ASC");
-    while ($memberResult && $member = $memberResult->fetch_assoc()) {
-        $members[] = $member;
-    }
-
-    return $members;
-}
-
-function fetch_all_families(mysqli $db): array
-{
-    $out = [];
-    $familyResult = $db->query("SELECT * FROM families ORDER BY id ASC");
-    if (!$familyResult) {
-        return $out;
-    }
-
-    while ($family = $familyResult->fetch_assoc()) {
-        $familyId = (int)$family['id'];
-        $family['anggota'] = fetch_family_members($db, $familyId);
-        $out[] = $family;
-    }
-
-    return $out;
-}
-
-function delete_family(mysqli $db, int $familyId): void
-{
-    $stmt = $db->prepare("DELETE FROM families WHERE id = ?");
-    $stmt->bind_param("i", $familyId);
-    $stmt->execute();
-    $stmt->close();
-}
-
-function reset_all_families(mysqli $db): void
-{
-    $db->query("DELETE FROM members");
-    $db->query("DELETE FROM families");
-}
-
-function replace_family(mysqli $db, int $familyId, int $infaq, array $members): void
-{
-    $stmt = $db->prepare("DELETE FROM members WHERE family_id = ?");
-    $stmt->bind_param("i", $familyId);
-    $stmt->execute();
-    $stmt->close();
-
-    insert_members($db, $familyId, $members);
-
-    $stmt = $db->prepare("UPDATE families SET infaq = ? WHERE id = ?");
-    $stmt->bind_param("ii", $infaq, $familyId);
-    $stmt->execute();
-    $stmt->close();
 }
 
 function calculate_family_totals(array $family, array $setting): array

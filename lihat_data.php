@@ -7,26 +7,20 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/family_service.php';
 
-// pastikan koneksi tersedia
-if (!isset($mysqli) || !$mysqli instanceof mysqli) {
-    die("Koneksi database tidak terbentuk. Pastikan config.php sudah benar.");
-}
-
 /* load setting */
-$setting = fetch_settings($mysqli);
+$setting = fetch_settings();
 
 /* HAPUS keluarga */
 if (isset($_POST['hapus_index'])) {
     $id = intval($_POST['hapus_index']);
-    // foreign key dengan ON DELETE CASCADE akan hapus members otomatis
-    delete_family($mysqli, $id);
+    delete_family($id);
     header("Location: index.php?page=lihat_data");
     exit;
 }
 
 /* RESET semua */
 if (isset($_POST['reset_semua'])) {
-    reset_all_families($mysqli);
+    reset_all_families();
     header("Location: index.php?page=lihat_data");
     exit;
 }
@@ -37,14 +31,14 @@ if (isset($_POST['update_index'])) {
     $infaq = isset($_POST['infaq']) ? INFAQ_VALUE : 0;
 
     $members = collect_members_from_post($_POST);
-    replace_family($mysqli, $fid, $infaq, $members);
+    replace_family($fid, $infaq, $members);
 
     header("Location: index.php?page=lihat_data");
     exit;
 }
 
 /* fetch data */
-$data = fetch_all_families($mysqli);
+$data = fetch_all_families();
 
 $overallTotals = calculate_overall_totals($data, $setting);
 ?>

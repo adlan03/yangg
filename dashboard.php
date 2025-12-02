@@ -13,9 +13,9 @@ require_login();
 /**
  * Simpan perubahan setting dengan validasi lock.
  */
-function handle_setting_update(mysqli $db): void
+function handle_setting_update(): void
 {
-    if (is_settings_locked($db)) {
+    if (is_settings_locked()) {
         redirect_to('index.php', 'err=locked');
     }
 
@@ -27,7 +27,7 @@ function handle_setting_update(mysqli $db): void
     $beras = $beras !== false ? $beras : 0.0;
     $jagung = $jagung !== false ? $jagung : 0.0;
 
-    update_settings($db, $harga, $beras, $jagung);
+    update_settings($harga, $beras, $jagung);
 
     redirect_to('index.php', 'ok=setting');
 }
@@ -35,9 +35,9 @@ function handle_setting_update(mysqli $db): void
 /**
  * Kunci atau buka kunci setting.
  */
-function toggle_setting_lock(mysqli $db, bool $locked): void
+function toggle_setting_lock(bool $locked): void
 {
-    set_setting_lock($db, $locked);
+    set_setting_lock($locked);
 
     redirect_to('index.php');
 }
@@ -45,16 +45,15 @@ function toggle_setting_lock(mysqli $db, bool $locked): void
 /**
  * Tentukan nama kepala keluarga dengan fallback otomatis.
  */
-function resolve_head_name(array $names, mysqli $db): string
+function resolve_head_name(array $names): string
 {
     $candidate = trim($names[0] ?? '');
     if ($candidate !== '') {
         return $candidate;
     }
 
-    $res = $db->query("SELECT COUNT(*) AS cnt FROM families");
-    $row = $res ? $res->fetch_assoc() : ['cnt' => 0];
-    $nextIndex = intval($row['cnt'] ?? 0) + 1;
+    $families = fetch_all_families();
+    $nextIndex = count($families) + 1;
 
     return "Kepala Keluarga " . $nextIndex;
 }
@@ -62,17 +61,17 @@ function resolve_head_name(array $names, mysqli $db): string
 /**
  * Simpan data keluarga beserta anggota.
  */
-function handle_family_submission(mysqli $db): void
+function handle_family_submission(): void
 {
     $members = collect_members_from_post($_POST);
     if (empty($members)) {
         redirect_to('index.php', 'err=empty');
     }
 
-    $kepala = resolve_head_name($_POST['nama'] ?? [], $db);
+    $kepala = resolve_head_name($_POST['nama'] ?? []);
     $infaq = isset($_POST['infaq']) ? INFAQ_VALUE : 0;
 
-    save_family($db, $kepala, $infaq, $members);
+    save_family($kepala, $infaq, $members);
 
     redirect_to('index.php', 'ok=saved');
 }
@@ -80,40 +79,40 @@ function handle_family_submission(mysqli $db): void
 /**
  * Dispatcher aksi POST agar kode utama lebih bersih.
  */
-function handle_post_request(mysqli $db): void
+function handle_post_request(): void
 {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         return;
     }
 
     if (isset($_POST['save_setting'])) {
-        handle_setting_update($db);
+        handle_setting_update();
     }
 
     if (isset($_POST['lock'])) {
-        toggle_setting_lock($db, true);
+        toggle_setting_lock(true);
     }
 
     if (isset($_POST['unlock'])) {
-        toggle_setting_lock($db, false);
+        toggle_setting_lock(false);
     }
 
     if (isset($_POST['simpan'])) {
-        handle_family_submission($db);
+        handle_family_submission();
     }
 }
 
-handle_post_request($mysqli);
+handle_post_request();
 
 /* ----- load setting untuk UI & JS ----- */
-$setting = fetch_settings($mysqli);
+$setting = fetch_settings();
 ?>
 <!doctype html>
 <html lang="id">
 
 <head>
     <meta charset="utf-8">
-    <title>Dashboard - Input Keluarga (MySQL)</title>
+    <title>Dashboard - Input Keluarga (Simulasi)</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/style.css">
 </head>
@@ -135,7 +134,7 @@ $setting = fetch_settings($mysqli);
 
             <!-- setting -->
             <form method="post" class="card setting-form">
-                <h4>Harga & Barang (tetap)</h4>
+                <h4>Harga & Barang (simulasi)</h4>
                 <label>Harga Uang per anggota (Rp)
                     <input type="number" name="harga" step="100" value="<?= htmlspecialchars((string)$setting['harga']) ?>" <?= $setting['locked'] ? 'readonly' : '' ?>>
                 </label>
@@ -159,6 +158,7 @@ $setting = fetch_settings($mysqli);
 
             <!-- form keluarga -->
             <form method="post" id="formKeluarga" class="card">
+                <!-- Fitur ini dinonaktifkan pada versi tanpa database -->
                 <table id="tabelKeluarga">
                     <thead>
                         <tr>
